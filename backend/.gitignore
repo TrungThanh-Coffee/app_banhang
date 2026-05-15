@@ -1,0 +1,77 @@
+# =========================
+# Node dependencies
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Runtime logs
+# =========================
+logs/
+*.log
+*.log.*
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# Environment files
+# Project này không dùng .env,
+# nhưng vẫn ignore để tránh lỡ tạo rồi commit nhầm
+# =========================
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# =========================
+# Build / cache
+# =========================
+dist/
+build/
+.cache/
+.tmp/
+temp/
+coverage/
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Editor files
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Database dump / backup
+# =========================
+*.sql.bak
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
+
+# =========================
+# Uploads / generated files
+# Nếu sau này backend có upload ảnh
+# =========================
+uploads/
+public/uploads/
+
+# =========================
+# Lock files optional
+# Giữ package-lock.json nếu muốn ổn định version.
+# Không ignore package-lock.json.
+# =========================
