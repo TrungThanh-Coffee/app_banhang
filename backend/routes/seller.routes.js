@@ -4,43 +4,43 @@ const { authRequired, allowRoles } = require('../middleware/auth.middleware');
 
 router.use(authRequired, allowRoles('SELLER', 'ADMIN'));
 
-async function dashboard(req, res) {
-  try {
-    const sellerId = req.user.user_id;
+// async function dashboard(req, res) {
+//   try {
+//     const sellerId = req.user.user_id;
 
-    const [productRows] = await pool.query(
-      `SELECT 
-        COUNT(*) AS total_products,
-        COALESCE(SUM(stock), 0) AS total_stock
-      FROM products
-      WHERE seller_id = ? AND status = 'active'`,
-      [sellerId]
-    );
+//     const [productRows] = await pool.query(
+//       `SELECT 
+//         COUNT(*) AS total_products,
+//         COALESCE(SUM(stock), 0) AS total_stock
+//       FROM products
+//       WHERE seller_id = ? AND status = 'active'`,
+//       [sellerId]
+//     );
 
-    const [orderRows] = await pool.query(
-      `SELECT 
-        COUNT(DISTINCT oi.order_id) AS total_orders,
-        COALESCE(SUM(oi.subtotal), 0) AS revenue
-      FROM order_items oi
-      JOIN orders o ON o.order_id = oi.order_id
-      WHERE oi.seller_id = ? 
-      AND o.order_status <> 'CANCELLED'`,
-      [sellerId]
-    );
+//     const [orderRows] = await pool.query(
+//       `SELECT 
+//         COUNT(DISTINCT oi.order_id) AS total_orders,
+//         COALESCE(SUM(oi.subtotal), 0) AS revenue
+//       FROM order_items oi
+//       JOIN orders o ON o.order_id = oi.order_id
+//       WHERE oi.seller_id = ? 
+//       AND o.order_status <> 'CANCELLED'`,
+//       [sellerId]
+//     );
 
-    return res.json({
-      total_products: productRows[0].total_products,
-      total_stock: productRows[0].total_stock,
-      total_orders: orderRows[0].total_orders,
-      revenue: orderRows[0].revenue,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: 'Lỗi tải dashboard người bán',
-      error: error.message,
-    });
-  }
-}
+//     return res.json({
+//       total_products: productRows[0].total_products,
+//       total_stock: productRows[0].total_stock,
+//       total_orders: orderRows[0].total_orders,
+//       revenue: orderRows[0].revenue,
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       message: 'Lỗi tải dashboard người bán',
+//       error: error.message,
+//     });
+//   }
+// }
 
 async function listMyProducts(req, res) {
   try {
