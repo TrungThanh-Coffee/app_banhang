@@ -383,7 +383,6 @@ async function updateOrderStatus(req, res) {
   }
 }
 
-router.get('/dashboard', dashboard);
 router.get('/products', listMyProducts);
 router.post('/products', createProduct);
 router.put('/products/:id', updateProduct);
