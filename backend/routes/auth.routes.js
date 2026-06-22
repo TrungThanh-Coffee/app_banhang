@@ -13,6 +13,7 @@ function cleanUser(user) {
     email: user.email,
     phone: user.phone,
     address: user.address,
+    avatar_url: user.avatar_url || null,
     role: user.role,
     status: user.status,
   };
@@ -105,6 +106,7 @@ async function register(req, res) {
       email,
       phone: phone || null,
       address: address || null,
+      avatar_url: null,
       role,
       status: 'active',
     };
@@ -148,7 +150,7 @@ async function login(req, res) {
     }
 
     const [rows] = await pool.query(
-      `SELECT user_id, full_name, email, password_hash, phone, address, role, status
+      `SELECT user_id, full_name, email, password_hash, phone, address, avatar_url, role, status
        FROM users
        WHERE email = ?
        LIMIT 1`,

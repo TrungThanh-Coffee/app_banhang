@@ -1,57 +1,82 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 
 import { apiRequest } from '../api/apiClient';
+import BannerCarousel from '../components/BannerCarousel';
 import ProductCard from '../components/ProductCard';
+import ProductCategories from '../components/ProductCategories';
+import SkeletonProductGrid from '../components/SkeletonProductGrid';
+import TopNavigationBar from '../components/TopNavigationBar';
+import { colors } from '../theme/theme';
+
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList);
+const TOP_SPACE = 108;
 
 export default function HomeScreen({ navigation }) {
   const { width } = useWindowDimensions();
-  const numColumns = width >= 760 ? 3 : 2;
+  const cardWidth = useMemo(function () {
+    return (width - 44) / 2;
+  }, [width]);
 
+  const scrollY = useSharedValue(0);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState('');
   const [keyword, setKeyword] = useState('');
+  const [cartCount, setCartCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const onScroll = useAnimatedScrollHandler({
+    onScroll: function (event) {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
 
   async function loadCategories() {
     const data = await apiRequest('/categories');
     setCategories(data);
   }
 
-  async function loadProducts() {
+  async function loadProducts(nextKeyword = keyword, nextCategoryId = categoryId) {
     const params = [];
 
-    if (keyword) {
-      params.push('q=' + encodeURIComponent(keyword));
-    }
-
-    if (categoryId) {
-      params.push('category_id=' + categoryId);
-    }
+    if (nextKeyword) params.push('q=' + encodeURIComponent(nextKeyword.trim()));
+    if (nextCategoryId) params.push('category_id=' + nextCategoryId);
 
     const query = params.length > 0 ? '?' + params.join('&') : '';
     const data = await apiRequest('/products' + query);
     setProducts(data);
   }
 
+  async function loadCartCount() {
+    try {
+      const data = await apiRequest('/cart');
+      const count = (data.items || []).reduce(function (sum, item) {
+        return sum + Number(item.quantity || 0);
+      }, 0);
+      setCartCount(count);
+    } catch (error) {
+      setCartCount(0);
+    }
+  }
+
   async function loadData() {
     try {
       setLoading(true);
-      await loadCategories();
-      await loadProducts();
+      await Promise.all([loadCategories(), loadProducts('', ''), loadCartCount()]);
     } catch (error) {
       Alert.alert('Lỗi', error.message);
     } finally {
@@ -62,11 +87,34 @@ export default function HomeScreen({ navigation }) {
   async function handleRefresh() {
     try {
       setRefreshing(true);
-      await loadProducts();
+      await Promise.all([loadProducts(), loadCartCount()]);
     } catch (error) {
       Alert.alert('Lỗi', error.message);
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function handleSearch() {
+    try {
+      setLoading(true);
+      await loadProducts(keyword, categoryId);
+    } catch (error) {
+      Alert.alert('Lỗi', error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSelectCategory(nextCategoryId) {
+    try {
+      setCategoryId(nextCategoryId);
+      setLoading(true);
+      await loadProducts(keyword, nextCategoryId);
+    } catch (error) {
+      Alert.alert('Lỗi', error.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -80,7 +128,9 @@ export default function HomeScreen({ navigation }) {
         }),
       });
 
-      Alert.alert('Thành công', 'Đã thêm sản phẩm vào giỏ hàng');
+      setCartCount(function (count) {
+        return count + 1;
+      });
     } catch (error) {
       Alert.alert('Lỗi', error.message);
     }
@@ -90,86 +140,84 @@ export default function HomeScreen({ navigation }) {
     loadData();
   }, []);
 
-  useEffect(function () {
-    loadProducts().catch(function () {});
-  }, [categoryId]);
+  const renderItem = useCallback(
+    function ({ item }) {
+      return (
+        <ProductCard
+          product={item}
+          cardWidth={cardWidth}
+          onPress={function () {
+            navigation.navigate('Detail', { productId: item.product_id });
+          }}
+          onAdd={addToCart}
+        />
+      );
+    },
+    [cardWidth, navigation]
+  );
 
-  const renderItem = useCallback(function ({ item }) {
-    return (
-      <ProductCard
-        product={item}
-        onPress={function () {
-          navigation.navigate('Detail', { productId: item.product_id });
-        }}
-        onAdd={function () {
-          addToCart(item);
-        }}
-      />
-    );
-  }, []);
+  const listHeader = useMemo(
+    function () {
+      return (
+        <View>
+          <View style={styles.heroTextBox}>
+            <Text style={styles.greeting}>Coffee nè Store</Text>
+            <Text style={styles.headline}>Tìm món hay, mua ngay trong vài chạm.</Text>
+          </View>
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#8B5E3C" />
-      </View>
-    );
-  }
+          <BannerCarousel />
+
+          <ProductCategories
+            categories={categories}
+            selectedId={categoryId}
+            onSelect={handleSelectCategory}
+          />
+
+          <View style={styles.productHeader}>
+            <Text style={styles.sectionTitle}>Gợi ý cho bạn</Text>
+            <Text style={styles.productCount}>{products.length} sản phẩm</Text>
+          </View>
+        </View>
+      );
+    },
+    [categories, categoryId, products.length, keyword]
+  );
 
   return (
     <View style={styles.page}>
-      <View style={styles.searchBox}>
-        <TextInput
-          value={keyword}
-          onChangeText={setKeyword}
-          placeholder="Tìm sản phẩm..."
-          style={styles.searchInput}
-          returnKeyType="search"
-          onSubmitEditing={loadProducts}
-        />
-
-        <Pressable onPress={loadProducts} style={styles.searchButton}>
-          <Text style={styles.searchText}>Tìm</Text>
-        </Pressable>
-      </View>
-
-      <FlatList
-        horizontal
-        data={[{ category_id: '', category_name: 'Tất cả' }].concat(categories)}
-        keyExtractor={function (item) {
-          return String(item.category_id);
-        }}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoryList}
-        renderItem={function ({ item }) {
-          const active = String(categoryId) === String(item.category_id);
-
-          return (
-            <Pressable
-              onPress={function () {
-                setCategoryId(item.category_id);
-              }}
-              style={[styles.categoryChip, active && styles.categoryActive]}
-            >
-              <Text style={[styles.categoryText, active && styles.categoryTextActive]}>
-                {item.category_name}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
-
-      <FlatList
-        key={numColumns}
-        data={products}
-        numColumns={numColumns}
+      <AnimatedFlatList
+        data={loading ? [] : products}
+        key="product-grid-2"
+        numColumns={2}
         keyExtractor={function (item) {
           return String(item.product_id);
         }}
         renderItem={renderItem}
-        contentContainerStyle={styles.productList}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
+          loading ? <SkeletonProductGrid /> : <Text style={styles.empty}>Không có sản phẩm phù hợp</Text>
+        }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-        ListEmptyComponent={<Text style={styles.empty}>Không có sản phẩm phù hợp</Text>}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        contentContainerStyle={styles.productList}
+        columnWrapperStyle={styles.columnWrapper}
+      />
+
+      <TopNavigationBar
+        keyword={keyword}
+        onChangeKeyword={setKeyword}
+        onSubmitSearch={handleSearch}
+        cartCount={cartCount}
+        scrollY={scrollY}
+        onCartPress={function () {
+          navigation.navigate('Shopping');
+        }}
       />
     </View>
   );
@@ -178,68 +226,55 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: '#F8F1E7',
-  },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchBox: {
-    flexDirection: 'row',
-    padding: 12,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  searchButton: {
-    backgroundColor: '#8B5E3C',
-    paddingHorizontal: 18,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchText: {
-    color: '#fff',
-    fontWeight: '800',
-  },
-  categoryList: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  categoryChip: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  categoryActive: {
-    backgroundColor: '#8B5E3C',
-    borderColor: '#8B5E3C',
-  },
-  categoryText: {
-    color: '#374151',
-    fontWeight: '700',
-  },
-  categoryTextActive: {
-    color: '#fff',
+    backgroundColor: colors.background,
   },
   productList: {
-    padding: 6,
-    paddingBottom: 30,
+    paddingTop: TOP_SPACE,
+    paddingBottom: 132,
+  },
+  columnWrapper: {
+    paddingHorizontal: 10,
+  },
+  heroTextBox: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  greeting: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  headline: {
+    marginTop: 5,
+    maxWidth: 320,
+    color: colors.text,
+    fontSize: 27,
+    lineHeight: 32,
+    fontWeight: '900',
+  },
+  productHeader: {
+    paddingHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: 19,
+    color: colors.text,
+    fontWeight: '900',
+  },
+  productCount: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: '800',
   },
   empty: {
     textAlign: 'center',
-    marginTop: 40,
-    color: '#6B7280',
+    color: colors.textSoft,
+    marginTop: 42,
+    fontWeight: '700',
   },
 });

@@ -104,6 +104,7 @@ export default function SellerProductsScreen({ navigation }) {
 
       <FlatList
         data={products}
+        contentContainerStyle={styles.listContent}
         keyExtractor={function (item) {
           return String(item.product_id);
         }}
@@ -119,6 +120,7 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: '#F8F1E7',
+    paddingTop: 58,
   },
   header: {
     padding: 12,
@@ -170,6 +172,9 @@ const styles = StyleSheet.create({
   actionText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  listContent: {
+    paddingBottom: 132,
   },
   empty: {
     textAlign: 'center',

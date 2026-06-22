@@ -1,30 +1,56 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { apiRequest } from '../api/apiClient';
+import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
 import AppButton from '../components/AppButton';
-
-function formatMoney(value) {
-  return Number(value || 0).toLocaleString('vi-VN') + 'đ';
-}
+import { colors, radius, shadows } from '../theme/theme';
+import { formatMoney } from '../utils/format';
 
 export default function CartScreen() {
+  const { height } = useWindowDimensions();
+  const { user } = useAuth();
+  const { refreshNotifications } = useNotifications();
   const [cart, setCart] = useState({ items: [], total: 0 });
   const [refreshing, setRefreshing] = useState(false);
-  const [receiverName, setReceiverName] = useState('Nguyễn Văn A');
-  const [receiverPhone, setReceiverPhone] = useState('0987654321');
-  const [shippingAddress, setShippingAddress] = useState('TP.HCM');
+  const [receiverName, setReceiverName] = useState(user?.full_name || '');
+  const [receiverPhone, setReceiverPhone] = useState(user?.phone || '');
+  const [shippingAddress, setShippingAddress] = useState(user?.address || '');
   const [loadingOrder, setLoadingOrder] = useState(false);
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const sheetProgress = useSharedValue(0);
+
+  const sheetHeight = Math.min(height * 0.78, 560);
+
+  useEffect(function () {
+    setReceiverName(user?.full_name || '');
+    setReceiverPhone(user?.phone || '');
+    setShippingAddress(user?.address || '');
+  }, [user]);
 
   async function loadCart() {
     const data = await apiRequest('/cart');
@@ -36,6 +62,24 @@ export default function CartScreen() {
       loadCart().catch(function () {});
     }, [])
   );
+
+  function openCheckout() {
+    if (cart.items.length === 0) {
+      Alert.alert('Thông báo', 'Giỏ hàng đang trống');
+      return;
+    }
+
+    setCheckoutVisible(true);
+    sheetProgress.value = withSpring(1, { damping: 18, stiffness: 220 });
+  }
+
+  function closeCheckout() {
+    sheetProgress.value = withTiming(0, { duration: 180 }, function (finished) {
+      if (finished) {
+        runOnJS(setCheckoutVisible)(false);
+      }
+    });
+  }
 
   async function refreshCart() {
     try {
@@ -57,9 +101,7 @@ export default function CartScreen() {
 
       await apiRequest('/cart/items/' + item.product_id, {
         method: 'PUT',
-        body: JSON.stringify({
-          quantity,
-        }),
+        body: JSON.stringify({ quantity }),
       });
 
       await loadCart();
@@ -87,25 +129,26 @@ export default function CartScreen() {
         return;
       }
 
-      if (!receiverName || !receiverPhone || !shippingAddress) {
+      if (!receiverName.trim() || !receiverPhone.trim() || !shippingAddress.trim()) {
         Alert.alert('Thông báo', 'Vui lòng nhập đủ thông tin nhận hàng');
         return;
       }
 
       setLoadingOrder(true);
 
-      await apiRequest('/orders', {
+      const data = await apiRequest('/orders', {
         method: 'POST',
         body: JSON.stringify({
-          receiver_name: receiverName,
-          receiver_phone: receiverPhone,
-          shipping_address: shippingAddress,
+          receiver_name: receiverName.trim(),
+          receiver_phone: receiverPhone.trim(),
+          shipping_address: shippingAddress.trim(),
           payment_method: 'COD',
         }),
       });
 
-      Alert.alert('Thành công', 'Đặt hàng thành công');
-      await loadCart();
+      Alert.alert('Đặt hàng thành công', 'Đơn hàng #' + data.order_id + ' đã được tạo. Bạn có thể theo dõi ở mục Thông báo.');
+      closeCheckout();
+      await Promise.all([loadCart(), refreshNotifications()]);
     } catch (error) {
       Alert.alert('Lỗi', error.message);
     } finally {
@@ -113,9 +156,29 @@ export default function CartScreen() {
     }
   }
 
+  const overlayStyle = useAnimatedStyle(function () {
+    return {
+      opacity: interpolate(sheetProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP),
+    };
+  });
+
+  const sheetStyle = useAnimatedStyle(function () {
+    return {
+      transform: [
+        {
+          translateY: interpolate(sheetProgress.value, [0, 1], [sheetHeight + 40, 0], Extrapolation.CLAMP),
+        },
+      ],
+    };
+  });
+
   function renderItem({ item }) {
     return (
       <View style={styles.item}>
+        <View style={styles.productIcon}>
+          <Ionicons name="cube-outline" size={22} color={colors.primary} />
+        </View>
+
         <View style={{ flex: 1 }}>
           <Text style={styles.name}>{item.product_name}</Text>
           <Text style={styles.price}>{formatMoney(item.price)}</Text>
@@ -145,11 +208,12 @@ export default function CartScreen() {
         </View>
 
         <Pressable
+          hitSlop={8}
           onPress={function () {
             removeItem(item);
           }}
         >
-          <Text style={styles.remove}>Xóa</Text>
+          <Ionicons name="trash-outline" size={21} color={colors.danger} />
         </Pressable>
       </View>
     );
@@ -157,44 +221,115 @@ export default function CartScreen() {
 
   return (
     <View style={styles.page}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Giỏ hàng</Text>
+        <Text style={styles.subtitle}>Chỉ hiển thị sản phẩm. Tổng tiền và thông tin nhận hàng nằm ở bước đặt hàng.</Text>
+      </View>
+
       <FlatList
         data={cart.items}
+        contentContainerStyle={styles.listContent}
         keyExtractor={function (item) {
           return String(item.cart_item_id);
         }}
         renderItem={renderItem}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshCart} />}
-        ListEmptyComponent={<Text style={styles.empty}>Giỏ hàng đang trống</Text>}
-        ListFooterComponent={
-          <View style={styles.checkout}>
-            <Text style={styles.total}>Tổng tiền: {formatMoney(cart.total)}</Text>
-
-            <Text style={styles.formTitle}>Thông tin nhận hàng</Text>
-
-            <TextInput
-              value={receiverName}
-              onChangeText={setReceiverName}
-              placeholder="Tên người nhận"
-              style={styles.input}
-            />
-
-            <TextInput
-              value={receiverPhone}
-              onChangeText={setReceiverPhone}
-              placeholder="Số điện thoại"
-              style={styles.input}
-            />
-
-            <TextInput
-              value={shippingAddress}
-              onChangeText={setShippingAddress}
-              placeholder="Địa chỉ giao hàng"
-              style={styles.input}
-            />
-
-            <AppButton title="Đặt hàng COD" loading={loadingOrder} onPress={createOrder} />
+        ListEmptyComponent={
+          <View style={styles.emptyBox}>
+            <Ionicons name="bag-handle-outline" size={42} color={colors.textSoft} />
+            <Text style={styles.empty}>Giỏ hàng đang trống</Text>
           </View>
         }
+      />
+
+      {cart.items.length > 0 ? (
+        <View style={styles.floatingOrderBar}>
+          <View>
+            <Text style={styles.orderBarLabel}>{cart.items.length} sản phẩm trong giỏ</Text>
+            <Text style={styles.orderBarHint}>Bấm Đặt ngay để xem tổng tiền</Text>
+          </View>
+
+          <Pressable style={styles.orderNowButton} onPress={openCheckout}>
+            <Text style={styles.orderNowText}>Đặt ngay</Text>
+            <Ionicons name="arrow-up-outline" size={18} color="#fff" />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {checkoutVisible ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <Animated.View style={[styles.overlay, overlayStyle]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeCheckout} />
+          </Animated.View>
+
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.sheetKeyboardView}
+            pointerEvents="box-none"
+          >
+            <Animated.View style={[styles.checkoutSheet, { height: sheetHeight }, sheetStyle]}>
+              <View style={styles.sheetHandle} />
+
+              <View style={styles.sheetHeader}>
+                <View>
+                  <Text style={styles.sheetTitle}>Xác nhận đặt hàng</Text>
+                  <Text style={styles.sheetSubtitle}>Kiểm tra thông tin trước khi gửi đơn.</Text>
+                </View>
+
+                <Pressable style={styles.closeButton} onPress={closeCheckout}>
+                  <Ionicons name="close" size={22} color={colors.text} />
+                </Pressable>
+              </View>
+
+              <View style={styles.totalCard}>
+                <Text style={styles.totalLabel}>Tổng tiền cần thanh toán</Text>
+                <Text style={styles.total}>{formatMoney(cart.total)}</Text>
+                <Text style={styles.paymentHint}>Thanh toán khi nhận hàng · COD</Text>
+              </View>
+
+              <Text style={styles.formTitle}>Thông tin nhận hàng</Text>
+
+              <CheckoutInput
+                icon="person-outline"
+                value={receiverName}
+                onChangeText={setReceiverName}
+                placeholder="Tên người nhận"
+              />
+
+              <CheckoutInput
+                icon="call-outline"
+                value={receiverPhone}
+                onChangeText={setReceiverPhone}
+                placeholder="Số điện thoại"
+                keyboardType="phone-pad"
+              />
+
+              <CheckoutInput
+                icon="location-outline"
+                value={shippingAddress}
+                onChangeText={setShippingAddress}
+                placeholder="Địa chỉ giao hàng"
+                multiline
+              />
+
+              <AppButton title="Xác nhận đặt hàng" loading={loadingOrder} onPress={createOrder} />
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function CheckoutInput({ icon, multiline, ...props }) {
+  return (
+    <View style={[styles.inputShell, multiline && styles.inputShellMultiline]}>
+      <Ionicons name={icon} size={19} color={colors.primary} />
+      <TextInput
+        {...props}
+        multiline={multiline}
+        placeholderTextColor="#9CA3AF"
+        style={[styles.input, multiline && styles.inputMultiline]}
       />
     </View>
   );
@@ -203,31 +338,57 @@ export default function CartScreen() {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: '#F8F1E7',
+    backgroundColor: colors.background,
+    paddingTop: 58,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: colors.text,
+  },
+  subtitle: {
+    marginTop: 6,
+    color: colors.textSoft,
+    fontWeight: '700',
+    lineHeight: 20,
   },
   item: {
     backgroundColor: '#fff',
     marginHorizontal: 12,
     marginTop: 12,
     padding: 14,
-    borderRadius: 18,
+    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+    ...shadows.soft,
+  },
+  productIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
   },
   name: {
-    fontWeight: '800',
-    color: '#111827',
+    fontWeight: '900',
+    color: colors.text,
   },
   price: {
     marginTop: 4,
-    color: '#8B5E3C',
-    fontWeight: '800',
+    color: colors.primary,
+    fontWeight: '900',
   },
   subtotal: {
-    color: '#6B7280',
+    color: colors.textSoft,
     fontSize: 12,
     marginTop: 2,
+    fontWeight: '700',
   },
   quantityBox: {
     flexDirection: 'row',
@@ -240,7 +401,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 999,
-    backgroundColor: '#8B5E3C',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -250,40 +411,163 @@ const styles = StyleSheet.create({
   },
   qtyNumber: {
     paddingHorizontal: 10,
-    fontWeight: '800',
+    fontWeight: '900',
+    color: colors.text,
   },
-  remove: {
-    color: '#DC2626',
-    fontWeight: '700',
+  listContent: {
+    paddingBottom: 210,
+  },
+  emptyBox: {
+    alignItems: 'center',
+    marginTop: 80,
+    gap: 10,
   },
   empty: {
-    textAlign: 'center',
-    marginTop: 40,
-    color: '#6B7280',
+    color: colors.textSoft,
+    fontWeight: '800',
   },
-  checkout: {
-    backgroundColor: '#fff',
-    margin: 12,
-    padding: 16,
-    borderRadius: 20,
+  floatingOrderBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 102,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    ...shadows.floating,
   },
-  total: {
-    fontSize: 20,
+  orderBarLabel: {
+    color: colors.text,
     fontWeight: '900',
-    color: '#8B5E3C',
+  },
+  orderBarHint: {
+    marginTop: 3,
+    color: colors.textSoft,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  orderNowButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+  },
+  orderNowText: {
+    color: '#fff',
+    fontWeight: '900',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(20,20,20,0.36)',
+  },
+  sheetKeyboardView: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  checkoutSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    padding: 18,
+    paddingBottom: 28,
+    ...shadows.floating,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 48,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.border,
     marginBottom: 14,
   },
-  formTitle: {
-    fontWeight: '800',
-    marginBottom: 10,
-    color: '#111827',
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  input: {
+  sheetTitle: {
+    fontSize: 22,
+    color: colors.text,
+    fontWeight: '900',
+  },
+  sheetSubtitle: {
+    color: colors.textSoft,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  totalCard: {
+    marginTop: 16,
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: colors.surfaceSoft,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+  },
+  totalLabel: {
+    color: colors.textSoft,
+    fontWeight: '800',
+  },
+  total: {
+    marginTop: 5,
+    fontSize: 28,
+    fontWeight: '900',
+    color: colors.primary,
+  },
+  paymentHint: {
+    marginTop: 4,
+    color: colors.textSoft,
+    fontWeight: '700',
+  },
+  formTitle: {
+    marginTop: 16,
+    marginBottom: 10,
+    color: colors.text,
+    fontWeight: '900',
+    fontSize: 16,
+  },
+  inputShell: {
+    minHeight: 52,
+    borderRadius: 18,
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    padding: 12,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
     marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  inputShellMultiline: {
+    minHeight: 76,
+    alignItems: 'flex-start',
+    paddingTop: 14,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 10,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  inputMultiline: {
+    minHeight: 50,
+    textAlignVertical: 'top',
   },
 });

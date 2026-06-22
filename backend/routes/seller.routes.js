@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const pool = require('../config/db');
 const { authRequired, allowRoles } = require('../middleware/auth.middleware');
+const logger = require('../utils/logger');
 
 router.use(authRequired, allowRoles('SELLER', 'ADMIN'));
 
@@ -338,7 +339,26 @@ async function orderDetail(req, res) {
   }
 }
 
+function getOrderStatusText(status) {
+  const labels = {
+    PENDING: 'Chờ xác nhận',
+    CONFIRMED: 'Đang chuẩn bị hàng',
+    SHIPPING: 'Đang giao hàng',
+    COMPLETED: 'Đã giao thành công',
+    CANCELLED: 'Đã hủy',
+  };
+
+  return labels[status] || status;
+}
+
 async function updateOrderStatus(req, res) {
+  logger.line('SELLER CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG');
+  logger.input('Params', req.params);
+  logger.input('Body nhận vào', req.body);
+  logger.input('Seller từ token', req.user);
+
+  const conn = await pool.getConnection();
+
   try {
     const orderId = req.params.id;
     const { order_status } = req.body;
@@ -346,40 +366,144 @@ async function updateOrderStatus(req, res) {
     const allowedStatuses = ['CONFIRMED', 'SHIPPING', 'COMPLETED', 'CANCELLED'];
 
     if (!allowedStatuses.includes(order_status)) {
-      return res.status(400).json({
-        message: 'Trạng thái đơn hàng không hợp lệ',
-      });
+      const response = { message: 'Trạng thái đơn hàng không hợp lệ' };
+      logger.response(400, response);
+      return res.status(400).json(response);
     }
 
-    const [owns] = await pool.query(
-      `SELECT order_item_id
-       FROM order_items
-       WHERE order_id = ? AND seller_id = ?
-       LIMIT 1`,
+    await conn.beginTransaction();
+
+    logger.step('Kiểm tra đơn hàng có sản phẩm thuộc seller này không');
+    const [orders] = await conn.query(
+      `SELECT
+        o.order_id,
+        o.customer_id,
+        o.receiver_name,
+        o.receiver_phone,
+        o.shipping_address,
+        o.total_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status AS old_status,
+        SUM(oi.subtotal) AS seller_total
+       FROM orders o
+       JOIN order_items oi ON oi.order_id = o.order_id
+       WHERE o.order_id = ? AND oi.seller_id = ?
+       GROUP BY
+        o.order_id,
+        o.customer_id,
+        o.receiver_name,
+        o.receiver_phone,
+        o.shipping_address,
+        o.total_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status
+       LIMIT 1
+       FOR UPDATE`,
       [orderId, req.user.user_id]
     );
 
-    if (owns.length === 0) {
-      return res.status(404).json({
-        message: 'Không tìm thấy đơn hàng của người bán',
-      });
+    const order = orders[0];
+    logger.step('Thông tin đơn hàng trước khi update', order || null);
+
+    if (!order) {
+      await conn.rollback();
+      const response = { message: 'Không tìm thấy đơn hàng của người bán' };
+      logger.response(404, response);
+      return res.status(404).json(response);
     }
 
-    await pool.query(
+    logger.step('Update orders.order_status', {
+      order_id: orderId,
+      from: order.old_status,
+      to: order_status,
+    });
+
+    await conn.query(
       `UPDATE orders
        SET order_status = ?
        WHERE order_id = ?`,
       [order_status, orderId]
     );
 
-    return res.json({
+    const statusText = getOrderStatusText(order_status);
+
+    logger.step('Insert thông báo mới cho buyer', {
+      buyer_user_id: order.customer_id,
+      order_id: orderId,
+      status: statusText,
+    });
+
+    const [notificationResult] = await conn.query(
+      `INSERT INTO notifications
+      (
+        user_id,
+        type,
+        title,
+        message,
+        order_id
+      )
+      VALUES (?, 'ORDER_STATUS_UPDATED', ?, ?, ?)`,
+      [
+        order.customer_id,
+        'Đơn hàng #' + orderId + ' đã cập nhật',
+        'Trạng thái đơn hàng của bạn hiện là: ' + statusText + '.',
+        orderId,
+      ]
+    );
+
+    const [updatedRows] = await conn.query(
+      `SELECT
+        o.order_id,
+        o.customer_id,
+        o.receiver_name,
+        o.receiver_phone,
+        o.shipping_address,
+        o.total_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status,
+        o.updated_at,
+        SUM(oi.subtotal) AS seller_total
+       FROM orders o
+       JOIN order_items oi ON oi.order_id = o.order_id
+       WHERE o.order_id = ? AND oi.seller_id = ?
+       GROUP BY
+        o.order_id,
+        o.customer_id,
+        o.receiver_name,
+        o.receiver_phone,
+        o.shipping_address,
+        o.total_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status,
+        o.updated_at
+       LIMIT 1`,
+      [orderId, req.user.user_id]
+    );
+
+    await conn.commit();
+
+    const response = {
       message: 'Đã cập nhật trạng thái đơn hàng',
-    });
+      notification_id: notificationResult.insertId,
+      order: updatedRows[0],
+    };
+
+    logger.success('Cập nhật trạng thái và tạo thông báo thành công', response);
+    logger.response(200, response);
+    return res.json(response);
   } catch (error) {
-    return res.status(500).json({
-      message: 'Lỗi cập nhật trạng thái đơn hàng',
-      error: error.message,
-    });
+    await conn.rollback();
+    logger.fail('Lỗi cập nhật trạng thái đơn hàng, rollback transaction', error);
+
+    const response = { message: 'Lỗi cập nhật trạng thái đơn hàng', error: error.message };
+    logger.response(500, response);
+    return res.status(500).json(response);
+  } finally {
+    conn.release();
   }
 }
 

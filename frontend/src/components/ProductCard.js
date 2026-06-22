@@ -1,87 +1,132 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { memo } from 'react';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
-function formatMoney(value) {
-  return Number(value || 0).toLocaleString('vi-VN') + 'đ';
-}
+import AnimatedPressable from './AnimatedPressable';
+import { colors, radius, shadows } from '../theme/theme';
+import { formatMoney } from '../utils/format';
 
-export default function ProductCard({ product, onPress, onAdd }) {
+function ProductCard({ product, onPress, onAdd, cardWidth }) {
   return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <Image
-        source={{
-          uri: product.image_url || 'https://via.placeholder.com/400x400.png?text=Product',
-        }}
-        style={styles.image}
-      />
+    <AnimatedPressable activeScale={0.975} style={[styles.card, cardWidth ? { width: cardWidth } : null]} onPress={onPress}>
+      <View style={styles.imageWrap}>
+        <Image
+          source={{
+            uri: product.image_url || 'https://via.placeholder.com/500x500.png?text=Product',
+          }}
+          style={styles.image}
+          resizeMode="cover"
+        />
+        <View style={styles.stockPill}>
+          <Ionicons name="cube-outline" size={12} color={colors.secondary} />
+          <Text style={styles.stockText}>{Number(product.stock || 0)}</Text>
+        </View>
+      </View>
 
       <View style={styles.body}>
         <Text numberOfLines={2} style={styles.name}>
           {product.product_name}
         </Text>
 
-        <Text style={styles.price}>{formatMoney(product.price)}</Text>
-
-        <Text numberOfLines={1} style={styles.meta}>
-          Tồn kho: {product.stock}
+        <Text numberOfLines={1} style={styles.store}>
+          {product.store_name || product.category_name || 'Shop'}
         </Text>
 
-        {onAdd ? (
-          <Pressable style={styles.addButton} onPress={onAdd}>
-            <Text style={styles.addText}>Thêm giỏ</Text>
-          </Pressable>
-        ) : null}
+        <View style={styles.bottomRow}>
+          <Text numberOfLines={1} style={styles.price}>{formatMoney(product.price)}</Text>
+
+          {onAdd ? (
+            <AnimatedPressable
+              activeScale={0.86}
+              style={styles.addButton}
+              onPress={function (event) {
+                if (event && event.stopPropagation) event.stopPropagation();
+                onAdd(product);
+              }}
+            >
+              <Ionicons name="add" size={20} color="#fff" />
+            </AnimatedPressable>
+          ) : null}
+        </View>
       </View>
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     overflow: 'hidden',
-    margin: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    margin: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.8)',
+    ...shadows.soft,
+  },
+  imageWrap: {
+    height: 150,
+    backgroundColor: colors.muted,
   },
   image: {
     width: '100%',
-    height: 150,
-    backgroundColor: '#F3F4F6',
+    height: '100%',
+  },
+  stockPill: {
+    position: 'absolute',
+    left: 9,
+    bottom: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  stockText: {
+    color: colors.secondary,
+    fontWeight: '900',
+    fontSize: 11,
   },
   body: {
     padding: 12,
   },
   name: {
-    fontSize: 15,
+    minHeight: 39,
+    fontSize: 14.5,
+    lineHeight: 19,
+    fontWeight: '900',
+    color: colors.text,
+  },
+  store: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.textSoft,
     fontWeight: '700',
-    color: '#111827',
-    minHeight: 40,
+  },
+  bottomRow: {
+    marginTop: 10,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   price: {
-    marginTop: 6,
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#8B5E3C',
-  },
-  meta: {
-    marginTop: 4,
-    color: '#6B7280',
-    fontSize: 12,
+    flex: 1,
+    color: colors.primary,
+    fontSize: 15.5,
+    fontWeight: '900',
   },
   addButton: {
-    marginTop: 10,
-    backgroundColor: '#8B5E3C',
-    paddingVertical: 9,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
     alignItems: 'center',
-  },
-  addText: {
-    color: '#fff',
-    fontWeight: '700',
+    justifyContent: 'center',
   },
 });
+
+export default memo(ProductCard);

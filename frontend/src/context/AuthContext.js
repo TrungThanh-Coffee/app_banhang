@@ -58,6 +58,21 @@ export function AuthProvider({ children }) {
     await saveTokenAndUser(data.token, data.user);
   }
 
+  function updateUser(nextUser) {
+    setUser(function (currentUser) {
+      return {
+        ...(currentUser || {}),
+        ...(nextUser || {}),
+      };
+    });
+  }
+
+  async function refreshUser() {
+    const currentUser = await apiRequest('/profile');
+    setUser(currentUser);
+    return currentUser;
+  }
+
   async function logout() {
     setAuthToken(null);
     setUser(null);
@@ -67,7 +82,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

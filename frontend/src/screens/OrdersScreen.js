@@ -87,6 +87,7 @@ export default function OrdersScreen() {
     <FlatList
       style={styles.page}
       data={orders}
+      contentContainerStyle={styles.listContent}
       keyExtractor={function (item) {
         return String(item.order_id);
       }}
@@ -101,6 +102,7 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: '#F8F1E7',
+    paddingTop: 58,
   },
   card: {
     backgroundColor: '#fff',
@@ -147,6 +149,9 @@ const styles = StyleSheet.create({
   payText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  listContent: {
+    paddingBottom: 132,
   },
   empty: {
     textAlign: 'center',

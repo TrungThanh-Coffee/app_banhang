@@ -1,15 +1,63 @@
 const router = require('express').Router();
 const pool = require('../config/db');
 const { authRequired, allowRoles } = require('../middleware/auth.middleware');
+const logger = require('../utils/logger');
 
 router.use(authRequired, allowRoles('CUSTOMER'));
 
+async function getOrderDetailForCustomer(orderId, customerId, conn) {
+  const db = conn || pool;
+
+  const [orders] = await db.query(
+    `SELECT 
+      order_id,
+      customer_id,
+      receiver_name,
+      receiver_phone,
+      shipping_address,
+      total_amount,
+      payment_method,
+      payment_status,
+      order_status,
+      created_at,
+      updated_at
+    FROM orders
+    WHERE order_id = ? AND customer_id = ?
+    LIMIT 1`,
+    [orderId, customerId]
+  );
+
+  if (orders.length === 0) return null;
+
+  const [items] = await db.query(
+    `SELECT 
+      order_item_id,
+      product_id,
+      seller_id,
+      product_name,
+      unit_price,
+      quantity,
+      subtotal
+    FROM order_items
+    WHERE order_id = ?`,
+    [orderId]
+  );
+
+  return {
+    order: orders[0],
+    items,
+  };
+}
+
 async function createOrder(req, res) {
+  logger.line('TẠO ĐƠN HÀNG');
+  logger.input('Body nhận vào', req.body);
+  logger.input('User từ token', req.user);
+
   const conn = await pool.getConnection();
 
   try {
     const userId = req.user.user_id;
-
     const {
       receiver_name,
       receiver_phone,
@@ -20,13 +68,21 @@ async function createOrder(req, res) {
     const finalPaymentMethod = payment_method || 'COD';
 
     if (!receiver_name || !receiver_phone || !shipping_address) {
-      return res.status(400).json({
-        message: 'Vui lòng nhập đầy đủ thông tin nhận hàng',
-      });
+      const response = { message: 'Vui lòng nhập đầy đủ thông tin nhận hàng' };
+      logger.response(400, response);
+      return res.status(400).json(response);
     }
 
+    if (!['COD', 'BANKING', 'E-WALLET'].includes(finalPaymentMethod)) {
+      const response = { message: 'Phương thức thanh toán không hợp lệ' };
+      logger.response(400, response);
+      return res.status(400).json(response);
+    }
+
+    logger.step('Bắt đầu transaction tạo đơn hàng');
     await conn.beginTransaction();
 
+    logger.step('Lấy sản phẩm trong giỏ hàng và khóa tồn kho FOR UPDATE');
     const [items] = await conn.query(
       `SELECT 
         ci.product_id,
@@ -44,30 +100,39 @@ async function createOrder(req, res) {
       [userId]
     );
 
+    logger.step('Danh sách sản phẩm trong giỏ hàng', items);
+
     if (items.length === 0) {
       await conn.rollback();
-
-      return res.status(400).json({
-        message: 'Giỏ hàng đang trống',
-      });
+      const response = { message: 'Giỏ hàng đang trống' };
+      logger.response(400, response);
+      return res.status(400).json(response);
     }
 
     for (let i = 0; i < items.length; i++) {
       if (items[i].stock < items[i].quantity) {
         await conn.rollback();
-
-        return res.status(400).json({
+        const response = {
           message: 'Sản phẩm "' + items[i].product_name + '" không đủ tồn kho',
-        });
+          product_id: items[i].product_id,
+          stock: items[i].stock,
+          requested_quantity: items[i].quantity,
+        };
+        logger.response(400, response);
+        return res.status(400).json(response);
       }
     }
 
-    let totalAmount = 0;
+    logger.step('Tính tổng tiền đơn hàng');
+    const totalAmount = items.reduce(function (sum, item) {
+      return sum + Number(item.price) * Number(item.quantity);
+    }, 0);
 
-    for (let i = 0; i < items.length; i++) {
-      totalAmount = totalAmount + Number(items[i].price) * Number(items[i].quantity);
-    }
+    logger.step('Tổng tiền đã tính', { total_amount: totalAmount });
 
+    const paymentStatus = finalPaymentMethod === 'COD' ? 'UNPAID' : 'PAID';
+
+    logger.step('Insert bảng orders');
     const [orderResult] = await conn.query(
       `INSERT INTO orders
       (
@@ -88,16 +153,25 @@ async function createOrder(req, res) {
         shipping_address,
         totalAmount,
         finalPaymentMethod,
-        finalPaymentMethod === 'COD' ? 'UNPAID' : 'PAID',
+        paymentStatus,
         'PENDING',
       ]
     );
 
     const orderId = orderResult.insertId;
+    logger.step('Order ID vừa tạo', { order_id: orderId });
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const subtotal = Number(item.price) * Number(item.quantity);
+
+      logger.step('Insert order_items', {
+        order_id: orderId,
+        product_id: item.product_id,
+        seller_id: item.seller_id,
+        quantity: item.quantity,
+        subtotal,
+      });
 
       await conn.query(
         `INSERT INTO order_items
@@ -122,6 +196,11 @@ async function createOrder(req, res) {
         ]
       );
 
+      logger.step('Trừ tồn kho sản phẩm', {
+        product_id: item.product_id,
+        minus_quantity: item.quantity,
+      });
+
       await conn.query(
         `UPDATE products
          SET stock = stock - ?
@@ -130,6 +209,7 @@ async function createOrder(req, res) {
       );
     }
 
+    logger.step('Insert bảng payments');
     await conn.query(
       `INSERT INTO payments
       (
@@ -144,11 +224,31 @@ async function createOrder(req, res) {
         orderId,
         totalAmount,
         finalPaymentMethod,
-        finalPaymentMethod === 'COD' ? 'UNPAID' : 'PAID',
+        paymentStatus,
         finalPaymentMethod === 'COD' ? null : new Date(),
       ]
     );
 
+    logger.step('Tạo thông báo cho buyer sau khi đặt hàng thành công');
+    const [notificationResult] = await conn.query(
+      `INSERT INTO notifications
+      (
+        user_id,
+        type,
+        title,
+        message,
+        order_id
+      )
+      VALUES (?, 'ORDER_CREATED', ?, ?, ?)`,
+      [
+        userId,
+        'Đặt hàng thành công',
+        'Đơn hàng #' + orderId + ' đã được tạo thành công. Shop sẽ sớm xác nhận đơn của bạn.',
+        orderId,
+      ]
+    );
+
+    logger.step('Xóa giỏ hàng sau khi tạo đơn thành công');
     await conn.query(
       `DELETE ci
        FROM cart_items ci
@@ -157,26 +257,36 @@ async function createOrder(req, res) {
       [userId]
     );
 
+    const orderDetail = await getOrderDetailForCustomer(orderId, userId, conn);
     await conn.commit();
 
-    return res.status(201).json({
+    const response = {
       message: 'Đặt hàng thành công',
       order_id: orderId,
       total_amount: totalAmount,
-    });
+      notification_id: notificationResult.insertId,
+      data: orderDetail,
+    };
+
+    logger.success('Tạo đơn hàng thành công', response);
+    logger.response(201, response);
+    return res.status(201).json(response);
   } catch (error) {
     await conn.rollback();
+    logger.fail('Lỗi đặt hàng, rollback transaction', error);
 
-    return res.status(500).json({
-      message: 'Lỗi đặt hàng',
-      error: error.message,
-    });
+    const response = { message: 'Lỗi đặt hàng', error: error.message };
+    logger.response(500, response);
+    return res.status(500).json(response);
   } finally {
     conn.release();
   }
 }
 
 async function myOrders(req, res) {
+  logger.line('LẤY LỊCH SỬ ĐƠN HÀNG CỦA BUYER');
+  logger.input('User từ token', req.user);
+
   try {
     const [orders] = await pool.query(
       `SELECT 
@@ -188,80 +298,60 @@ async function myOrders(req, res) {
         payment_method,
         payment_status,
         order_status,
-        created_at
+        created_at,
+        updated_at
       FROM orders
       WHERE customer_id = ?
       ORDER BY created_at DESC`,
       [req.user.user_id]
     );
 
+    logger.success('Danh sách đơn hàng', { total: orders.length, orders });
+    logger.response(200, orders);
     return res.json(orders);
   } catch (error) {
-    return res.status(500).json({
-      message: 'Lỗi tải lịch sử đơn hàng',
-      error: error.message,
-    });
+    logger.fail('Lỗi tải lịch sử đơn hàng', error);
+    const response = { message: 'Lỗi tải lịch sử đơn hàng', error: error.message };
+    logger.response(500, response);
+    return res.status(500).json(response);
   }
 }
 
 async function orderDetail(req, res) {
+  logger.line('LẤY CHI TIẾT ĐƠN HÀNG BUYER');
+  logger.input('Params', req.params);
+  logger.input('User từ token', req.user);
+
   try {
     const orderId = req.params.id;
+    const detail = await getOrderDetailForCustomer(orderId, req.user.user_id);
 
-    const [orders] = await pool.query(
-      `SELECT 
-        order_id,
-        customer_id,
-        receiver_name,
-        receiver_phone,
-        shipping_address,
-        total_amount,
-        payment_method,
-        payment_status,
-        order_status,
-        created_at
-      FROM orders
-      WHERE order_id = ? AND customer_id = ?
-      LIMIT 1`,
-      [orderId, req.user.user_id]
-    );
-
-    if (orders.length === 0) {
-      return res.status(404).json({
-        message: 'Không tìm thấy đơn hàng',
-      });
+    if (!detail) {
+      const response = { message: 'Không tìm thấy đơn hàng' };
+      logger.response(404, response);
+      return res.status(404).json(response);
     }
 
-    const [items] = await pool.query(
-      `SELECT 
-        order_item_id,
-        product_id,
-        seller_id,
-        product_name,
-        unit_price,
-        quantity,
-        subtotal
-      FROM order_items
-      WHERE order_id = ?`,
-      [orderId]
-    );
-
-    return res.json({
-      order: orders[0],
-      items: items,
-    });
+    logger.success('Chi tiết đơn hàng', detail);
+    logger.response(200, detail);
+    return res.json(detail);
   } catch (error) {
-    return res.status(500).json({
-      message: 'Lỗi tải chi tiết đơn hàng',
-      error: error.message,
-    });
+    logger.fail('Lỗi tải chi tiết đơn hàng', error);
+    const response = { message: 'Lỗi tải chi tiết đơn hàng', error: error.message };
+    logger.response(500, response);
+    return res.status(500).json(response);
   }
 }
 
 async function payOrder(req, res) {
+  logger.line('THANH TOÁN ĐƠN HÀNG');
+  logger.input('Params', req.params);
+  logger.input('User từ token', req.user);
+
   try {
     const orderId = req.params.id;
 
+    logger.step('Update orders.payment_status = PAID');
     const [result] = await pool.query(
       `UPDATE orders
        SET payment_status = 'PAID'
@@ -272,11 +362,12 @@ async function payOrder(req, res) {
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({
-        message: 'Không tìm thấy đơn hàng cần thanh toán',
-      });
+      const response = { message: 'Không tìm thấy đơn hàng cần thanh toán' };
+      logger.response(404, response);
+      return res.status(404).json(response);
     }
 
+    logger.step('Update payments.payment_status = PAID');
     await pool.query(
       `UPDATE payments
        SET payment_status = 'PAID', paid_at = NOW()
@@ -284,14 +375,20 @@ async function payOrder(req, res) {
       [orderId]
     );
 
-    return res.json({
+    const detail = await getOrderDetailForCustomer(orderId, req.user.user_id);
+    const response = {
       message: 'Thanh toán thành công',
-    });
+      data: detail,
+    };
+
+    logger.success('Thanh toán thành công', response);
+    logger.response(200, response);
+    return res.json(response);
   } catch (error) {
-    return res.status(500).json({
-      message: 'Lỗi thanh toán đơn hàng',
-      error: error.message,
-    });
+    logger.fail('Lỗi thanh toán đơn hàng', error);
+    const response = { message: 'Lỗi thanh toán đơn hàng', error: error.message };
+    logger.response(500, response);
+    return res.status(500).json(response);
   }
 }
 
