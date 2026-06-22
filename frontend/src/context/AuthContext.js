@@ -1,60 +1,68 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiRequest, setCurrentUser } from '../api/apiClient';
+import { apiRequest, setAuthToken } from '../api/apiClient';
 
 const AuthContext = createContext(null);
+const TOKEN_STORAGE_KEY = 'auth_token';
 
 export function AuthProvider({ children }) {
-  const [user, setUserState] = useState(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  function setUser(userData) {
-    setUserState(userData);
-    setCurrentUser(userData);
-  }
-
   useEffect(function () {
-    async function restoreUser() {
-      const savedUser = await AsyncStorage.getItem('user');
+    async function restoreSession() {
+      try {
+        const savedToken = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
 
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser);
+        if (!savedToken) {
+          setLoading(false);
+          return;
+        }
+
+        setAuthToken(savedToken);
+        const currentUser = await apiRequest('/auth/me');
+        setUser(currentUser);
+      } catch (error) {
+        setAuthToken(null);
+        setUser(null);
+        await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     }
 
-    restoreUser();
+    restoreSession();
   }, []);
+
+  async function saveTokenAndUser(token, userData) {
+    setAuthToken(token);
+    setUser(userData);
+    await AsyncStorage.setItem(TOKEN_STORAGE_KEY, token);
+  }
 
   async function login(email, password) {
     const data = await apiRequest('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({
-        email,
-        password,
-      }),
+      body: JSON.stringify({ email, password }),
     });
 
-    setUser(data.user);
-    await AsyncStorage.setItem('user', JSON.stringify(data.user));
+    await saveTokenAndUser(data.token, data.user);
   }
 
-  async function register(payload, role) {
-    const path = role === 'SELLER' ? '/auth/register-seller' : '/auth/register';
-
-    const data = await apiRequest(path, {
+  async function register(payload) {
+    const data = await apiRequest('/auth/register', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
 
-    setUser(data.user);
-    await AsyncStorage.setItem('user', JSON.stringify(data.user));
+    await saveTokenAndUser(data.token, data.user);
   }
 
   async function logout() {
+    setAuthToken(null);
     setUser(null);
+    await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+    await AsyncStorage.removeItem('auth');
     await AsyncStorage.removeItem('user');
   }
 

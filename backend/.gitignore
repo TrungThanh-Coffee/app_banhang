@@ -20,14 +20,14 @@ pids/
 
 # =========================
 # Environment files
-# Project này không dùng .env,
-# nhưng vẫn ignore để tránh lỡ tạo rồi commit nhầm
+# Không commit file chứa secret/cấu hình thật
 # =========================
 .env
 .env.local
 .env.development
 .env.production
 .env.test
+!.env.example
 
 # =========================
 # Build / cache
@@ -65,13 +65,6 @@ desktop.ini
 
 # =========================
 # Uploads / generated files
-# Nếu sau này backend có upload ảnh
 # =========================
 uploads/
 public/uploads/
-
-# =========================
-# Lock files optional
-# Giữ package-lock.json nếu muốn ổn định version.
-# Không ignore package-lock.json.
-# =========================

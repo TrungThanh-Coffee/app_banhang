@@ -1,12 +1,34 @@
 const pool = require('../config/db');
+const { verifyToken } = require('../utils/token');
+
+function getBearerToken(req) {
+  const authorization = req.headers.authorization || '';
+  const parts = authorization.split(' ');
+
+  if (parts.length === 2 && parts[0] === 'Bearer' && parts[1]) {
+    return parts[1];
+  }
+
+  return null;
+}
 
 async function authRequired(req, res, next) {
   try {
-    const userId = req.headers['x-user-id'];
+    const token = getBearerToken(req);
 
-    if (!userId) {
+    if (!token) {
       return res.status(401).json({
         message: 'Bạn cần đăng nhập',
+      });
+    }
+
+    let payload;
+
+    try {
+      payload = verifyToken(token);
+    } catch (error) {
+      return res.status(401).json({
+        message: 'Token không hợp lệ hoặc đã hết hạn',
       });
     }
 
@@ -15,7 +37,7 @@ async function authRequired(req, res, next) {
        FROM users
        WHERE user_id = ?
        LIMIT 1`,
-      [userId]
+      [payload.user_id]
     );
 
     const user = rows[0];

@@ -1,8 +1,8 @@
-const API_BASE_URL = 'http://localhost:5000/api';
-let currentUser = null;
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
+let currentToken = null;
 
-export function setCurrentUser(user) {
-  currentUser = user;
+export function setAuthToken(token) {
+  currentToken = token;
 }
 
 export async function apiRequest(path, options = {}) {
@@ -11,8 +11,8 @@ export async function apiRequest(path, options = {}) {
     ...(options.headers || {}),
   };
 
-  if (currentUser && currentUser.user_id) {
-    headers['x-user-id'] = String(currentUser.user_id);
+  if (currentToken) {
+    headers.Authorization = `Bearer ${currentToken}`;
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {

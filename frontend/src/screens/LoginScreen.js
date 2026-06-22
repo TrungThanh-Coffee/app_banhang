@@ -21,20 +21,15 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
 
   async function handleLogin() {
-    try {
-      if (!email || !password) {
-        Alert.alert('Thông báo', 'Vui lòng nhập email và mật khẩu');
-        return;
-      }
-
-      setLoading(true);
-      await login(email, password);
-    } catch (error) {
-      Alert.alert('Lỗi đăng nhập', error.message);
-    } finally {
-      setLoading(false);
-    }
+  try {
+    setLoading(true);
+    await login(email, password);
+  } catch (error) {
+    Alert.alert('Lỗi đăng nhập', error.message);
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <KeyboardAvoidingView

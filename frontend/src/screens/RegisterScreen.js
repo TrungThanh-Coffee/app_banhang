@@ -29,17 +29,8 @@ export default function RegisterScreen({ navigation }) {
 
   async function handleRegister() {
     try {
-      if (!fullName || !email || !password) {
-        Alert.alert('Thông báo', 'Vui lòng nhập họ tên, email và mật khẩu');
-        return;
-      }
-
-      if (role === 'SELLER' && !storeName) {
-        Alert.alert('Thông báo', 'Người bán cần nhập tên cửa hàng');
-        return;
-      }
-
       const payload = {
+        role,
         full_name: fullName,
         email,
         password,
@@ -50,7 +41,7 @@ export default function RegisterScreen({ navigation }) {
       };
 
       setLoading(true);
-      await register(payload, role);
+      await register(payload);
     } catch (error) {
       Alert.alert('Lỗi đăng ký', error.message);
     } finally {

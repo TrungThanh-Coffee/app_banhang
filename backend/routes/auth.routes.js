@@ -1,7 +1,10 @@
 const router = require('express').Router();
 const pool = require('../config/db');
 const { hashPassword, verifyPassword } = require('../utils/password');
+const { generateToken } = require('../utils/token');
 const { authRequired } = require('../middleware/auth.middleware');
+
+const ALLOWED_REGISTER_ROLES = ['CUSTOMER', 'SELLER'];
 
 function cleanUser(user) {
   return {
@@ -15,53 +18,53 @@ function cleanUser(user) {
   };
 }
 
-async function registerCustomer(req, res) {
-  try {
-    const { full_name, email, password, phone, address } = req.body;
-
-    if (!full_name || !email || !password) {
-      return res.status(400).json({
-        message: 'Vui lòng nhập họ tên, email và mật khẩu',
-      });
-    }
-
-    const passwordHash = await hashPassword(password);
-
-    const [result] = await pool.query(
-      `INSERT INTO users (full_name, email, password_hash, phone, address, role)
-       VALUES (?, ?, ?, ?, ?, 'CUSTOMER')`,
-      [full_name, email, passwordHash, phone || null, address || null]
-    );
-
-    const user = {
-      user_id: result.insertId,
-      full_name,
-      email,
-      phone: phone || null,
-      address: address || null,
-      role: 'CUSTOMER',
-      status: 'active',
-    };
-
-    return res.status(201).json({
-      message: 'Đăng ký khách hàng thành công',
-      user,
-    });
-  } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({
-        message: 'Email hoặc số điện thoại đã tồn tại',
-      });
-    }
-
-    return res.status(500).json({
-      message: 'Lỗi đăng ký',
-      error: error.message,
-    });
+function normalizeRole(role) {
+  if (!role) {
+    return 'CUSTOMER';
   }
+
+  return String(role).trim().toUpperCase();
 }
 
-async function registerSeller(req, res) {
+function validateRegisterPayload(payload) {
+  const role = normalizeRole(payload.role);
+
+  if (!ALLOWED_REGISTER_ROLES.includes(role)) {
+    return {
+      valid: false,
+      message: 'Vai trò đăng ký không hợp lệ',
+    };
+  }
+
+  if (!payload.full_name || !payload.email || !payload.password) {
+    return {
+      valid: false,
+      message: 'Vui lòng nhập họ tên, email và mật khẩu',
+    };
+  }
+
+  if (role === 'SELLER' && !payload.store_name) {
+    return {
+      valid: false,
+      message: 'Người bán cần nhập tên cửa hàng',
+    };
+  }
+
+  return {
+    valid: true,
+    role,
+  };
+}
+
+async function register(req, res) {
+  const validation = validateRegisterPayload(req.body);
+
+  if (!validation.valid) {
+    return res.status(400).json({
+      message: validation.message,
+    });
+  }
+
   const conn = await pool.getConnection();
 
   try {
@@ -75,27 +78,24 @@ async function registerSeller(req, res) {
       store_description,
     } = req.body;
 
-    if (!full_name || !email || !password || !store_name) {
-      return res.status(400).json({
-        message: 'Vui lòng nhập đủ thông tin người bán và tên cửa hàng',
-      });
-    }
-
+    const role = validation.role;
     const passwordHash = await hashPassword(password);
 
     await conn.beginTransaction();
 
     const [userResult] = await conn.query(
       `INSERT INTO users (full_name, email, password_hash, phone, address, role)
-       VALUES (?, ?, ?, ?, ?, 'SELLER')`,
-      [full_name, email, passwordHash, phone || null, address || null]
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [full_name, email, passwordHash, phone || null, address || null, role]
     );
 
-    await conn.query(
-      `INSERT INTO seller_profiles (user_id, store_name, store_description)
-       VALUES (?, ?, ?)`,
-      [userResult.insertId, store_name, store_description || null]
-    );
+    if (role === 'SELLER') {
+      await conn.query(
+        `INSERT INTO seller_profiles (user_id, store_name, store_description)
+         VALUES (?, ?, ?)`,
+        [userResult.insertId, store_name, store_description || null]
+      );
+    }
 
     await conn.commit();
 
@@ -105,13 +105,14 @@ async function registerSeller(req, res) {
       email,
       phone: phone || null,
       address: address || null,
-      role: 'SELLER',
+      role,
       status: 'active',
     };
 
     return res.status(201).json({
-      message: 'Đăng ký người bán thành công',
+      message: 'Đăng ký thành công',
       user,
+      token: generateToken(user),
     });
   } catch (error) {
     await conn.rollback();
@@ -123,12 +124,17 @@ async function registerSeller(req, res) {
     }
 
     return res.status(500).json({
-      message: 'Lỗi đăng ký người bán',
+      message: 'Lỗi đăng ký',
       error: error.message,
     });
   } finally {
     conn.release();
   }
+}
+
+async function registerSeller(req, res) {
+  req.body.role = 'SELLER';
+  return register(req, res);
 }
 
 async function login(req, res) {
@@ -171,9 +177,12 @@ async function login(req, res) {
       });
     }
 
+    const cleanLoggedInUser = cleanUser(user);
+
     return res.json({
       message: 'Đăng nhập thành công',
-      user: cleanUser(user),
+      user: cleanLoggedInUser,
+      token: generateToken(cleanLoggedInUser),
     });
   } catch (error) {
     return res.status(500).json({
@@ -187,7 +196,7 @@ function me(req, res) {
   return res.json(req.user);
 }
 
-router.post('/register', registerCustomer);
+router.post('/register', register);
 router.post('/register-seller', registerSeller);
 router.post('/login', login);
 router.get('/me', authRequired, me);
