@@ -1,5 +1,3 @@
-const path = require('path');
-const fs = require('fs');
 const router = require('express').Router();
 const multer = require('multer');
 
@@ -7,27 +5,10 @@ const pool = require('../config/db');
 const { authRequired } = require('../middleware/auth.middleware');
 const logger = require('../utils/logger');
 
-const avatarDir = path.join(__dirname, '..', 'uploads', 'avatars');
-
-if (!fs.existsSync(avatarDir)) {
-  fs.mkdirSync(avatarDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (_req, _file, cb) {
-    cb(null, avatarDir);
-  },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.jpg';
-    const safeExt = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext) ? ext : '.jpg';
-    cb(null, 'user-' + req.user.user_id + '-' + Date.now() + safeExt);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: 2 * 1024 * 1024, // tối đa 2MB để tránh DB bị nặng
   },
   fileFilter: function (_req, file, cb) {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
@@ -66,33 +47,24 @@ async function getUserById(userId) {
   return rows[0] ? cleanUser(rows[0]) : null;
 }
 
-function buildAvatarUrl(req, filename) {
-  return req.protocol + '://' + req.get('host') + '/uploads/avatars/' + filename;
-}
-
 router.use(authRequired);
 
 router.get('/', async function (req, res) {
-  logger.line('LẤY PROFILE');
-  logger.input('User từ token', req.user);
-
   try {
     const user = await getUserById(req.user.user_id);
 
     if (!user) {
-      const response = { message: 'Không tìm thấy người dùng' };
-      logger.response(404, response);
-      return res.status(404).json(response);
+      return res.status(404).json({
+        message: 'Không tìm thấy người dùng',
+      });
     }
 
-    logger.success('Lấy profile thành công', user);
-    logger.response(200, user);
     return res.json(user);
   } catch (error) {
-    logger.fail('Lỗi lấy profile', error);
-    const response = { message: 'Lỗi tải profile', error: error.message };
-    logger.response(500, response);
-    return res.status(500).json(response);
+    return res.status(500).json({
+      message: 'Lỗi tải profile',
+      error: error.message,
+    });
   }
 });
 
@@ -105,21 +77,30 @@ router.patch('/', async function (req, res) {
     const { full_name, phone, address } = req.body;
 
     if (!full_name || !String(full_name).trim()) {
-      const response = { message: 'Họ tên không được bỏ trống' };
+      const response = {
+        message: 'Họ tên không được bỏ trống',
+      };
+
       logger.response(400, response);
       return res.status(400).json(response);
     }
 
-    logger.step('Bắt đầu cập nhật users.full_name / phone / address');
+    logger.step('Bắt đầu cập nhật thông tin cá nhân');
 
     await pool.query(
       `UPDATE users
        SET full_name = ?, phone = ?, address = ?
        WHERE user_id = ?`,
-      [String(full_name).trim(), phone || null, address || null, req.user.user_id]
+      [
+        String(full_name).trim(),
+        phone || null,
+        address || null,
+        req.user.user_id,
+      ]
     );
 
     const user = await getUserById(req.user.user_id);
+
     const response = {
       message: 'Cập nhật thông tin cá nhân thành công',
       user,
@@ -127,69 +108,122 @@ router.patch('/', async function (req, res) {
 
     logger.success('Profile sau khi cập nhật', user);
     logger.response(200, response);
+
     return res.json(response);
   } catch (error) {
     logger.fail('Lỗi cập nhật profile', error);
 
     if (error.code === 'ER_DUP_ENTRY') {
-      const response = { message: 'Số điện thoại đã được tài khoản khác sử dụng' };
+      const response = {
+        message: 'Số điện thoại đã được tài khoản khác sử dụng',
+      };
+
       logger.response(409, response);
       return res.status(409).json(response);
     }
 
-    const response = { message: 'Lỗi cập nhật thông tin cá nhân', error: error.message };
+    const response = {
+      message: 'Lỗi cập nhật thông tin cá nhân',
+      error: error.message,
+    };
+
     logger.response(500, response);
     return res.status(500).json(response);
   }
 });
 
-router.post('/avatar', upload.single('avatar'), async function (req, res) {
-  logger.line('UPLOAD AVATAR');
-  logger.input('User từ token', req.user);
-  logger.step('Thông tin file nhận được', req.file ? {
-    originalname: req.file.originalname,
-    filename: req.file.filename,
-    mimetype: req.file.mimetype,
-    size: req.file.size,
-  } : null);
+router.post('/avatar', function (req, res) {
+  upload.single('avatar')(req, res, async function (uploadError) {
+    logger.line('UPLOAD AVATAR');
+    logger.input('User từ token', req.user);
 
-  try {
-    if (!req.file) {
-      const response = { message: 'Vui lòng chọn ảnh đại diện' };
-      logger.response(400, response);
-      return res.status(400).json(response);
+    try {
+      if (uploadError) {
+        logger.fail('Lỗi multer khi upload avatar', uploadError);
+
+        if (uploadError.code === 'LIMIT_FILE_SIZE') {
+          const response = {
+            message: 'Ảnh đại diện quá lớn. Vui lòng chọn ảnh dưới 2MB.',
+          };
+
+          logger.response(400, response);
+          return res.status(400).json(response);
+        }
+
+        const response = {
+          message: uploadError.message || 'File upload không hợp lệ',
+        };
+
+        logger.response(400, response);
+        return res.status(400).json(response);
+      }
+
+      if (!req.file) {
+        const response = {
+          message: 'Vui lòng chọn ảnh đại diện',
+        };
+
+        logger.response(400, response);
+        return res.status(400).json(response);
+      }
+
+      logger.step('Thông tin file nhận được', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+      });
+
+      const base64Image = req.file.buffer.toString('base64');
+      const avatarDataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+
+      logger.step('Lưu ảnh đại diện trực tiếp vào cột users.avatar_url', {
+        user_id: req.user.user_id,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+      });
+
+      await pool.query(
+        `UPDATE users
+         SET avatar_url = ?
+         WHERE user_id = ?`,
+        [avatarDataUrl, req.user.user_id]
+      );
+
+      const user = await getUserById(req.user.user_id);
+
+      const response = {
+        message: 'Cập nhật ảnh đại diện thành công',
+        avatar_url: avatarDataUrl,
+        user,
+      };
+
+      logger.success('Avatar đã lưu vào database thành công', {
+        user_id: user.user_id,
+        full_name: user.full_name,
+        avatar_saved_in: 'users.avatar_url',
+      });
+
+      logger.response(200, {
+        message: response.message,
+        user: {
+          ...user,
+          avatar_url: '[BASE64_IMAGE_DATA]',
+        },
+      });
+
+      return res.json(response);
+    } catch (error) {
+      logger.fail('Lỗi upload avatar', error);
+
+      const response = {
+        message: 'Lỗi cập nhật ảnh đại diện',
+        error: error.message,
+      };
+
+      logger.response(500, response);
+      return res.status(500).json(response);
     }
-
-    const avatarUrl = buildAvatarUrl(req, req.file.filename);
-
-    logger.step('Lưu avatar_url vào bảng users', {
-      user_id: req.user.user_id,
-      avatar_url: avatarUrl,
-    });
-
-    await pool.query(
-      `UPDATE users
-       SET avatar_url = ?
-       WHERE user_id = ?`,
-      [avatarUrl, req.user.user_id]
-    );
-
-    const user = await getUserById(req.user.user_id);
-    const response = {
-      message: 'Cập nhật ảnh đại diện thành công',
-      avatar_url: avatarUrl,
-      user,
-    };
-
-    logger.success('Avatar đã cập nhật', response);
-    logger.response(200, response);
-    return res.json(response);
-  } catch (error) {
-    logger.fail('Lỗi upload avatar', error);
-    const response = { message: 'Lỗi cập nhật ảnh đại diện', error: error.message };
-    logger.response(500, response);
-    return res.status(500).json(response);
-  }
+  });
 });
 
 module.exports = router;

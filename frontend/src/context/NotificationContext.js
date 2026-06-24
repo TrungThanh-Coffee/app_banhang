@@ -58,7 +58,7 @@ export function NotificationProvider({ children }) {
     }
   }, [user?.user_id, recalculateUnreadCount]);
 
-  const markAsRead = useCallback((notificationId) => {
+  const markAsRead = useCallback(async (notificationId) => {
     setNotifications((prev) => {
       const nextList = prev.map((item) => {
         const currentId = getNotificationId(item);
@@ -76,9 +76,17 @@ export function NotificationProvider({ children }) {
       recalculateUnreadCount(nextList);
       return nextList;
     });
+
+    try {
+      await apiRequest('/notifications/' + notificationId + '/read', {
+        method: 'PATCH',
+      });
+    } catch (error) {
+      console.log('[NotificationContext] Không cập nhật được trạng thái đã đọc:', error.message);
+    }
   }, [recalculateUnreadCount]);
 
-  const markAllAsRead = useCallback(() => {
+  const markAllAsRead = useCallback(async () => {
     setNotifications((prev) => {
       const nextList = prev.map((item) => ({
         ...item,
@@ -88,9 +96,17 @@ export function NotificationProvider({ children }) {
       setUnreadCount(0);
       return nextList;
     });
+
+    try {
+      await apiRequest('/notifications/read-all', {
+        method: 'PATCH',
+      });
+    } catch (error) {
+      console.log('[NotificationContext] Không cập nhật được tất cả thông báo:', error.message);
+    }
   }, []);
 
-  const deleteNotification = useCallback((notificationId) => {
+  const deleteNotification = useCallback(async (notificationId) => {
     setNotifications((prev) => {
       const nextList = prev.filter((item) => {
         const currentId = getNotificationId(item);
@@ -100,6 +116,14 @@ export function NotificationProvider({ children }) {
       recalculateUnreadCount(nextList);
       return nextList;
     });
+
+    try {
+      await apiRequest('/notifications/' + notificationId, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.log('[NotificationContext] Không xóa được thông báo:', error.message);
+    }
   }, [recalculateUnreadCount]);
 
   const clearNotifications = useCallback(() => {

@@ -32,6 +32,15 @@ function ProductCard({ product, onPress, onAdd, cardWidth }) {
           {product.store_name || product.category_name || 'Shop'}
         </Text>
 
+        <View style={styles.ratingLine}>
+          <Ionicons name="star" size={12} color="#F59E0B" />
+          <Text numberOfLines={1} style={styles.ratingText}>
+            {Number(product.avg_rating || 0) > 0
+              ? Number(product.avg_rating).toFixed(1) + ' · ' + Number(product.review_count || 0) + ' đánh giá'
+              : 'Chưa có đánh giá'}
+          </Text>
+        </View>
+
         <View style={styles.bottomRow}>
           <Text numberOfLines={1} style={styles.price}>{formatMoney(product.price)}</Text>
 
@@ -103,6 +112,18 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     color: colors.textSoft,
+    fontWeight: '700',
+  },
+  ratingLine: {
+    marginTop: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ratingText: {
+    flex: 1,
+    color: colors.textSoft,
+    fontSize: 11,
     fontWeight: '700',
   },
   bottomRow: {

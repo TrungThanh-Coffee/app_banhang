@@ -10,6 +10,7 @@ import CustomerTabNavigator from './CustomerTabNavigator';
 import SellerTabNavigator from './SellerTabNavigator';
 
 import DetailScreen from '../screens/DetailScreen';
+import ShopDetailScreen from '../screens/ShopDetailScreen';
 import SellerProductFormScreen from '../screens/SellerProductFormScreen';
 
 const Stack = createNativeStackNavigator();
@@ -55,6 +56,12 @@ export default function AppNavigator() {
             name="Detail"
             component={DetailScreen}
             options={{ title: 'Chi tiết sản phẩm' }}
+          />
+
+          <Stack.Screen
+            name="ShopDetail"
+            component={ShopDetailScreen}
+            options={{ title: 'Thông tin shop' }}
           />
         </Stack.Navigator>
       )}

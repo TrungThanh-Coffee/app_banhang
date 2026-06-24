@@ -43,10 +43,18 @@ function getNotificationIcon(type) {
       };
 
     case 'ORDER_STATUS':
+    case 'ORDER_STATUS_UPDATED':
       return {
         name: 'cube-outline',
         backgroundColor: '#DBEAFE',
         color: '#2563EB',
+      };
+
+    case 'SYSTEM':
+      return {
+        name: 'star-outline',
+        backgroundColor: '#FEF3C7',
+        color: '#D97706',
       };
 
     case 'ORDER_CANCELLED':
@@ -198,7 +206,7 @@ export default function NotificationsScreen() {
           <View>
             <Text style={styles.headerTitle}>Thông báo</Text>
             <Text style={styles.headerSubtitle}>
-              Theo dõi đơn hàng và cập nhật mới nhất
+              Theo dõi đơn hàng, đánh giá và cập nhật mới nhất
             </Text>
           </View>
 
@@ -283,8 +291,8 @@ export default function NotificationsScreen() {
                 <Text style={styles.emptyTitle}>Chưa có thông báo</Text>
 
                 <Text style={styles.emptyText}>
-                  Khi bạn đặt hàng thành công hoặc đơn hàng được cập nhật trạng
-                  thái, thông báo sẽ hiển thị tại đây.
+                  Khi đơn hàng được cập nhật hoặc khách hàng đánh giá sản phẩm,
+                  thông báo sẽ hiển thị tại đây.
                 </Text>
               </View>
             }
