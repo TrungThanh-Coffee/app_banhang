@@ -161,7 +161,7 @@ export default function HomeScreen({ navigation }) {
       return (
         <View>
           <View style={styles.heroTextBox}>
-            <Text style={styles.greeting}>Coffee nè Store</Text>
+            {/* <Text style={styles.greeting}>Coffee nè Store</Text> */}
             <Text style={styles.headline}>Tìm món hay, mua ngay trong vài chạm.</Text>
           </View>
 

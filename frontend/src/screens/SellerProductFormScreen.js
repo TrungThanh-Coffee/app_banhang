@@ -15,46 +15,74 @@ import { apiRequest } from '../api/apiClient';
 import AppButton from '../components/AppButton';
 
 export default function SellerProductFormScreen({ navigation, route }) {
-  const product = route.params ? route.params.product : null;
+  const product = route && route.params ? route.params.product : null;
   const isEdit = Boolean(product);
 
   const [categories, setCategories] = useState([]);
-  const [categoryId, setCategoryId] = useState(product ? String(product.category_id) : '');
-  const [productName, setProductName] = useState(product ? product.product_name : '');
-  const [description, setDescription] = useState(product ? product.description || '' : '');
+  const [categoryId, setCategoryId] = useState(
+    product ? String(product.category_id) : ''
+  );
+  const [productName, setProductName] = useState(
+    product ? product.product_name : ''
+  );
+  const [description, setDescription] = useState(
+    product ? product.description || '' : ''
+  );
   const [price, setPrice] = useState(product ? String(product.price) : '');
   const [stock, setStock] = useState(product ? String(product.stock) : '');
-  const [imageUrl, setImageUrl] = useState(product ? product.image_url || '' : '');
+  const [imageUrl, setImageUrl] = useState(
+    product ? product.image_url || '' : ''
+  );
   const [loading, setLoading] = useState(false);
 
   async function loadCategories() {
     try {
       const data = await apiRequest('/categories');
-      setCategories(data);
+      const list = Array.isArray(data) ? data : [];
 
-      if (!categoryId && data.length > 0) {
-        setCategoryId(String(data[0].category_id));
+      setCategories(list);
+
+      if (!categoryId && list.length > 0) {
+        setCategoryId(String(list[0].category_id));
       }
     } catch (error) {
       Alert.alert('Lỗi', error.message);
     }
   }
 
+  function validateForm() {
+    if (!categoryId || !productName.trim() || !price || !stock) {
+      Alert.alert('Thông báo', 'Vui lòng nhập danh mục, tên, giá và tồn kho');
+      return false;
+    }
+
+    if (Number.isNaN(Number(price)) || Number(price) < 0) {
+      Alert.alert('Thông báo', 'Giá sản phẩm không hợp lệ');
+      return false;
+    }
+
+    if (Number.isNaN(Number(stock)) || Number(stock) < 0) {
+      Alert.alert('Thông báo', 'Tồn kho không hợp lệ');
+      return false;
+    }
+
+    return true;
+  }
+
   async function saveProduct() {
     try {
-      if (!categoryId || !productName || !price || !stock) {
-        Alert.alert('Thông báo', 'Vui lòng nhập danh mục, tên, giá và tồn kho');
+      if (!validateForm()) {
         return;
       }
 
       const payload = {
         category_id: Number(categoryId),
-        product_name: productName,
-        description,
+        product_name: productName.trim(),
+        description: description.trim(),
         price: Number(price),
         stock: Number(stock),
-        image_url: imageUrl,
-        status: 'active',
+        image_url: imageUrl.trim(),
+        status: isEdit ? product.status : 'active',
       };
 
       setLoading(true);
@@ -71,7 +99,11 @@ export default function SellerProductFormScreen({ navigation, route }) {
         });
       }
 
-      Alert.alert('Thành công', isEdit ? 'Đã cập nhật sản phẩm' : 'Đã thêm sản phẩm');
+      Alert.alert(
+        'Thành công',
+        isEdit ? 'Đã cập nhật sản phẩm' : 'Đã thêm sản phẩm'
+      );
+
       navigation.goBack();
     } catch (error) {
       Alert.alert('Lỗi', error.message);
@@ -90,7 +122,32 @@ export default function SellerProductFormScreen({ navigation, route }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>{isEdit ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}</Text>
+        <Text style={styles.title}>
+          {isEdit ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}
+        </Text>
+
+        {isEdit ? (
+          <View
+            style={[
+              styles.statusBox,
+              product.status === 'active'
+                ? styles.statusBoxActive
+                : styles.statusBoxInactive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                product.status === 'active'
+                  ? styles.statusTextActive
+                  : styles.statusTextInactive,
+              ]}
+            >
+              Trạng thái hiện tại:{' '}
+              {product.status === 'active' ? 'Đang bán' : 'Đã ẩn'}
+            </Text>
+          </View>
+        ) : null}
 
         <Text style={styles.label}>Danh mục</Text>
 
@@ -106,7 +163,12 @@ export default function SellerProductFormScreen({ navigation, route }) {
                 }}
                 style={[styles.categoryChip, active && styles.categoryActive]}
               >
-                <Text style={[styles.categoryText, active && styles.categoryTextActive]}>
+                <Text
+                  style={[
+                    styles.categoryText,
+                    active && styles.categoryTextActive,
+                  ]}
+                >
                   {item.category_name}
                 </Text>
               </Pressable>
@@ -167,25 +229,61 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F1E7',
   },
+
   content: {
     padding: 16,
   },
+
   title: {
     fontSize: 24,
     fontWeight: '900',
     color: '#111827',
     marginBottom: 16,
   },
+
+  statusBox: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+  },
+
+  statusBoxActive: {
+    backgroundColor: '#DCFCE7',
+    borderColor: '#86EFAC',
+  },
+
+  statusBoxInactive: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+  },
+
+  statusText: {
+    fontWeight: '900',
+    fontSize: 13,
+  },
+
+  statusTextActive: {
+    color: '#15803D',
+  },
+
+  statusTextInactive: {
+    color: '#4B5563',
+  },
+
   label: {
     fontWeight: '800',
     color: '#111827',
     marginBottom: 8,
   },
+
   categoryWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginBottom: 10,
   },
+
   categoryChip: {
     backgroundColor: '#fff',
     paddingHorizontal: 12,
@@ -196,17 +294,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
+
   categoryActive: {
     backgroundColor: '#8B5E3C',
     borderColor: '#8B5E3C',
   },
+
   categoryText: {
     color: '#374151',
     fontWeight: '700',
   },
+
   categoryTextActive: {
     color: '#fff',
   },
+
   input: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -215,8 +317,10 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     marginBottom: 12,
   },
+
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
   },
 });
+

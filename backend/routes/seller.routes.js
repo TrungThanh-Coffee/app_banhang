@@ -444,15 +444,15 @@ async function updateProduct(req, res) {
   }
 }
 
-async function deleteProduct(req, res) {
+async function setProductVisibility(req, res, status, successMessage, errorMessage) {
   try {
     const productId = req.params.id;
 
     const [result] = await pool.query(
       `UPDATE products
-       SET status = 'inactive'
+       SET status = ?, updated_at = NOW()
        WHERE product_id = ? AND seller_id = ?`,
-      [productId, req.user.user_id]
+      [status, productId, req.user.user_id]
     );
 
     if (result.affectedRows === 0) {
@@ -462,14 +462,36 @@ async function deleteProduct(req, res) {
     }
 
     return res.json({
-      message: 'Đã ẩn sản phẩm',
+      message: successMessage,
+      product_id: Number(productId),
+      status,
     });
   } catch (error) {
     return res.status(500).json({
-      message: 'Lỗi ẩn sản phẩm',
+      message: errorMessage,
       error: error.message,
     });
   }
+}
+
+async function deleteProduct(req, res) {
+  return setProductVisibility(
+    req,
+    res,
+    'inactive',
+    'Đã ẩn sản phẩm',
+    'Lỗi ẩn sản phẩm'
+  );
+}
+
+async function restoreProduct(req, res) {
+  return setProductVisibility(
+    req,
+    res,
+    'active',
+    'Đã hiện sản phẩm',
+    'Lỗi hiện sản phẩm'
+  );
 }
 
 async function listOrders(req, res) {
@@ -747,10 +769,13 @@ async function updateOrderStatus(req, res) {
 router.get('/profile', getSellerProfile);
 router.patch('/profile/shop', updateSellerShopProfile);
 router.get('/dashboard', dashboard);
+
 router.get('/products', listMyProducts);
 router.post('/products', createProduct);
+router.patch('/products/:id/hide', deleteProduct);
+router.patch('/products/:id/restore', restoreProduct);
 router.put('/products/:id', updateProduct);
-router.delete('/products/:id', deleteProduct);
+
 router.get('/orders', listOrders);
 router.get('/orders/:id', orderDetail);
 router.patch('/orders/:id/status', updateOrderStatus);

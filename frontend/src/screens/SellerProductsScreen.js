@@ -35,13 +35,33 @@ function ProductThumb({ imageUrl }) {
   );
 }
 
+function normalizeStatus(status) {
+  return String(status || '').trim().toLowerCase();
+}
+
 function StatusBadge({ status }) {
-  const isActive = status === 'active';
+  const isActive = normalizeStatus(status) === 'active';
 
   return (
-    <View style={[styles.statusBadge, isActive ? styles.statusActive : styles.statusInactive]}>
-      <View style={[styles.statusDot, isActive ? styles.statusDotActive : styles.statusDotInactive]} />
-      <Text style={[styles.statusText, isActive ? styles.statusTextActive : styles.statusTextInactive]}>
+    <View
+      style={[
+        styles.statusBadge,
+        isActive ? styles.statusActive : styles.statusInactive,
+      ]}
+    >
+      <View
+        style={[
+          styles.statusDot,
+          isActive ? styles.statusDotActive : styles.statusDotInactive,
+        ]}
+      />
+
+      <Text
+        style={[
+          styles.statusText,
+          isActive ? styles.statusTextActive : styles.statusTextInactive,
+        ]}
+      >
         {isActive ? 'Đang bán' : 'Đã ẩn'}
       </Text>
     </View>
@@ -51,15 +71,18 @@ function StatusBadge({ status }) {
 export default function SellerProductsScreen({ navigation }) {
   const [products, setProducts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
   async function loadProducts() {
     const data = await apiRequest('/seller/products');
-    setProducts(data);
+    setProducts(Array.isArray(data) ? data : []);
   }
 
   useFocusEffect(
     useCallback(function () {
-      loadProducts().catch(function () {});
+      loadProducts().catch(function (error) {
+        console.log('Lỗi tải sản phẩm:', error);
+      });
     }, [])
   );
 
@@ -68,40 +91,78 @@ export default function SellerProductsScreen({ navigation }) {
       setRefreshing(true);
       await loadProducts();
     } catch (error) {
-      Alert.alert('Lỗi', error.message);
+      Alert.alert('Lỗi', error.message || 'Không thể tải lại sản phẩm');
     } finally {
       setRefreshing(false);
     }
   }
 
-  async function deleteProduct(product) {
+  async function hideProduct(product) {
     try {
-      await apiRequest('/seller/products/' + product.product_id, {
-        method: 'DELETE',
+      setActionLoadingId(product.product_id);
+
+      console.log('CLICK ẨN SẢN PHẨM:', product.product_id);
+
+      await apiRequest('/seller/products/' + product.product_id + '/hide', {
+        method: 'PATCH',
       });
 
       Alert.alert('Thành công', 'Đã ẩn sản phẩm');
       await loadProducts();
     } catch (error) {
-      Alert.alert('Lỗi', error.message);
+      console.log('LỖI ẨN SẢN PHẨM:', error);
+      Alert.alert('Lỗi', error.message || 'Không thể ẩn sản phẩm');
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  async function showProduct(product) {
+    try {
+      setActionLoadingId(product.product_id);
+
+      console.log('CLICK HIỆN SẢN PHẨM:', product.product_id);
+
+      await apiRequest('/seller/products/' + product.product_id + '/restore', {
+        method: 'PATCH',
+      });
+
+      Alert.alert('Thành công', 'Đã hiện sản phẩm');
+      await loadProducts();
+    } catch (error) {
+      console.log('LỖI HIỆN SẢN PHẨM:', error);
+      Alert.alert('Lỗi', error.message || 'Không thể hiện sản phẩm');
+    } finally {
+      setActionLoadingId(null);
     }
   }
 
   function renderItem({ item }) {
+    const isActive = normalizeStatus(item.status) === 'active';
+    const isLoading = actionLoadingId === item.product_id;
+
     return (
       <View style={styles.card}>
         <ProductThumb imageUrl={item.image_url} />
 
         <View style={styles.infoCol}>
           <View style={styles.cardTopRow}>
-            <Text numberOfLines={2} style={styles.name}>{item.product_name}</Text>
+            <Text numberOfLines={2} style={styles.name}>
+              {item.product_name}
+            </Text>
+
             <StatusBadge status={item.status} />
           </View>
 
-          <Text numberOfLines={1} style={styles.category}>{item.category_name}</Text>
+          <Text numberOfLines={1} style={styles.category}>
+            {item.category_name}
+          </Text>
 
           <View style={styles.metaRow}>
-            <Text numberOfLines={1} style={styles.price}>{formatMoney(item.price)}</Text>
+            <Text numberOfLines={1} style={styles.price}>
+              {formatMoney(item.price)}
+            </Text>
+
             <View style={styles.stockPill}>
               <Ionicons name="cube-outline" size={12} color={colors.secondary} />
               <Text style={styles.stockText}>Kho: {item.stock}</Text>
@@ -110,7 +171,12 @@ export default function SellerProductsScreen({ navigation }) {
 
           <View style={styles.actions}>
             <Pressable
-              style={styles.editButton}
+              disabled={isLoading}
+              style={({ pressed }) => [
+                styles.editButton,
+                pressed && styles.buttonPressed,
+                isLoading && styles.actionButtonDisabled,
+              ]}
               onPress={function () {
                 navigation.navigate('SellerProductForm', { product: item });
               }}
@@ -119,15 +185,41 @@ export default function SellerProductsScreen({ navigation }) {
               <Text style={styles.actionText}>Sửa</Text>
             </Pressable>
 
-            <Pressable
-              style={styles.deleteButton}
-              onPress={function () {
-                deleteProduct(item);
-              }}
-            >
-              <Ionicons name="eye-off-outline" size={15} color="#fff" />
-              <Text style={styles.actionText}>Ẩn</Text>
-            </Pressable>
+            {isActive ? (
+              <Pressable
+                disabled={isLoading}
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  pressed && styles.buttonPressed,
+                  isLoading && styles.actionButtonDisabled,
+                ]}
+                onPress={function () {
+                  hideProduct(item);
+                }}
+              >
+                <Ionicons name="eye-off-outline" size={15} color="#fff" />
+                <Text style={styles.actionText}>
+                  {isLoading ? 'Đang xử lý' : 'Ẩn'}
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                disabled={isLoading}
+                style={({ pressed }) => [
+                  styles.showButton,
+                  pressed && styles.buttonPressed,
+                  isLoading && styles.actionButtonDisabled,
+                ]}
+                onPress={function () {
+                  showProduct(item);
+                }}
+              >
+                <Ionicons name="eye-outline" size={15} color="#fff" />
+                <Text style={styles.actionText}>
+                  {isLoading ? 'Đang xử lý' : 'Hiện'}
+                </Text>
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
@@ -139,7 +231,9 @@ export default function SellerProductsScreen({ navigation }) {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Sản phẩm của shop</Text>
-          <Text style={styles.headerSub}>Quản lý nhanh hình ảnh, giá bán và tồn kho</Text>
+          <Text style={styles.headerSub}>
+            Quản lý nhanh hình ảnh, giá bán và tồn kho
+          </Text>
         </View>
 
         <AppButton
@@ -157,7 +251,12 @@ export default function SellerProductsScreen({ navigation }) {
           return String(item.product_id);
         }}
         renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshProducts} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshProducts}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Ionicons name="cube-outline" size={30} color={colors.textSoft} />
@@ -175,6 +274,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingTop: 58,
   },
+
   header: {
     paddingHorizontal: 16,
     paddingBottom: 12,
@@ -183,17 +283,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+
   headerTitle: {
     color: colors.text,
     fontSize: 21,
     fontWeight: '900',
   },
+
   headerSub: {
     marginTop: 4,
     color: colors.textSoft,
     fontSize: 12.5,
     fontWeight: '700',
   },
+
   card: {
     backgroundColor: colors.surface,
     marginHorizontal: 16,
@@ -206,27 +309,32 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(232,222,210,0.78)',
     ...shadows.soft,
   },
+
   thumbnail: {
     width: 86,
     height: 86,
     borderRadius: 18,
     backgroundColor: colors.muted,
   },
+
   thumbnailPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
   },
+
   infoCol: {
     flex: 1,
     minHeight: 86,
   },
+
   cardTopRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
   },
+
   name: {
     flex: 1,
     fontWeight: '900',
@@ -234,12 +342,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.text,
   },
+
   category: {
     color: colors.textSoft,
     marginTop: 4,
     fontSize: 12.5,
     fontWeight: '700',
   },
+
   metaRow: {
     marginTop: 8,
     flexDirection: 'row',
@@ -247,12 +357,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+
   price: {
     flex: 1,
     color: colors.primary,
     fontWeight: '900',
     fontSize: 15.5,
   },
+
   stockPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -262,11 +374,13 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: radius.pill,
   },
+
   stockText: {
     color: colors.secondary,
     fontSize: 11,
     fontWeight: '900',
   },
+
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -275,38 +389,48 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: radius.pill,
   },
+
   statusActive: {
     backgroundColor: '#DCFCE7',
   },
+
   statusInactive: {
     backgroundColor: '#F3F4F6',
   },
+
   statusDot: {
     width: 6,
     height: 6,
     borderRadius: 99,
   },
+
   statusDotActive: {
     backgroundColor: '#16A34A',
   },
+
   statusDotInactive: {
     backgroundColor: '#6B7280',
   },
+
   statusText: {
     fontSize: 11,
     fontWeight: '900',
   },
+
   statusTextActive: {
     color: '#15803D',
   },
+
   statusTextInactive: {
     color: '#4B5563',
   },
+
   actions: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 10,
   },
+
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -316,6 +440,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
   },
+
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -325,20 +450,43 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
   },
+
+  showButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+
+  buttonPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.97 }],
+  },
+
+  actionButtonDisabled: {
+    opacity: 0.6,
+  },
+
   actionText: {
     color: '#fff',
     fontWeight: '900',
     fontSize: 12,
   },
+
   listContent: {
     paddingTop: 4,
     paddingBottom: 132,
   },
+
   emptyWrap: {
     alignItems: 'center',
     marginTop: 52,
     gap: 8,
   },
+
   empty: {
     textAlign: 'center',
     color: colors.textSoft,
